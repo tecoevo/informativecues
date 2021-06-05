@@ -1,0 +1,353 @@
+---
+title: "On the fitness of informative cues in complex environments"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+Fabrizio Mafessoni, Michael Lachmann, Chaitanya S. Gokhale
+
+# Appendix B
+### Examples of estimates of the fitness of informative cues in R code 
+
+In this notebook we provide an R tutorial to apply an information theoretic approach to empirical studies from literature. 
+
+We use the package "optimx" for numerical optimization. We start by defining useful functions for our estimates:
+
+- G_fx: function to calculate the log growth rate of a bet-hedging strategy adopting a set of phenotypes with probabilities given in the vector pr_ph to respond to a set of environments occurring with probabilities given in the vector pr_e. The payoff matrix A describes the fitness of an individual for each combination phenotype(rows)-environment(columns).
+
+- GC_fx: function to calculate the log growth rate of a strategy when the environmental cues are known, given a set of environments occurring with probabilities given in the vector pr_e and a payoff matrix A. Note that this formula is valid for organisms in which fitness is determined by the occurrence of a single environmental state in a specific time of their life-cycle (as in annual plants). For different cases see the *Clunio* examples below.
+
+- find_optimal_pr.ph: function to estimate optimal bet-hedging strategy by maximizing the geometric fitness. Arguments are a set of environments occurring with probabilities given in the vector pr_e and a payoff matrix A.
+
+- delta_GC_fx: wrapper function that returns the fitness benefit of informative cue G(E|C)-G(E), G(E) and the optimal bet-hedging strategy. Arguments are the same as GC_fx.
+
+```{r}
+library(optimx)
+
+G_fx<-function(pr.ph,pr.e,A) {
+    #pr_ph: probabilities phenotypes
+    #pr_e: probabilities environment
+    #A: payoff matrix with phenotypes as rows and environments as cols
+sum(sapply(1:length(pr.e), function(ie) pr.e[ie]*log(sum(sapply(1:length(pr.ph), function(iph) pr.ph[iph]*A[iph,ie])))))
+}
+                        
+GC_fx<-function(pr.e,A) {
+    #pr_e: probabilities environment
+    #A: payoff matrix with phenotypes as rows and environments as cols
+best_phenotypes<-sapply(1:ncol(A),function(z) which.max(A[,z]))
+sum(sapply(1:length(pr.e), function(ie) pr.e[ie]*log(A[best_phenotypes[ie],ie])))
+}
+
+find_optimal_pr.ph<-function(pr.e,A){
+    opt_G_fx<-function(x_pr.ph){ 
+        #G+penalty for optimization when probabilities of phenotypes are <0 or >1
+        G_fx(x_pr.ph,pr.e,A)+sum((-sum(x_pr.ph)+1)[sum(x_pr.ph)>1],sum(x_pr.ph)[sum(x_pr.ph)<0]) }
+    x_pr.ph<-rep(1/nrow(A),nrow(A)) #set initial conditions
+    #remove "invisible->capture.output" if you are interested in exploring optimization
+    invisible(capture.output(myoptim<-optimx(x_pr.ph,fn=opt_G_fx,control=list(maximize=TRUE,trace=0,maxit=100,kkt=FALSE),hessian=FALSE,method=c("L-BFGS-B"),lower=0,upper=1)))
+    unlist(myoptim[1:length(x_pr.ph)]/sum(myoptim[1:length(x_pr.ph)]))
+    }
+           
+delta_GC_fx<-function(pr.e,A) 
+    {
+    my_bh_strategy<-find_optimal_pr.ph(pr.e,A)
+    GE<-G_fx(my_bh_strategy,pr.e,A)
+    res<-unlist(c(GC_fx(pr.e,A)-GE,GE,my_bh_strategy))
+    return(res)
+}   
+   
+plot_bh.regions<-function(){
+    #function to plot bet-hedging region
+    bh.region<-approx(range_pr.pe,deltaG[3,],xout=seq(0.01,1,0.001))
+    init.bh<-sapply(2:(length(bh.region$x)),function(x) if ( (bh.region$y[x-1]==0 || bh.region$y[x-1]==1) && (bh.region$y[x]!=0 && bh.region$y[x]!=1) ){1} else 0)
+    end.bh<-sapply(1:(length(bh.region$x)-1),function(x) if ( (bh.region$y[x+1]==0 || bh.region$y[x+1]==1) && (bh.region$y[x]!=0 && bh.region$y[x]!=1) ){1} else 0)
+    if ( min(which(init.bh==1))< min(which(end.bh==1))) {init.bh<-c(0,init.bh)} else {init.bh<-c(1,init.bh)}
+    if ( max(which(init.bh==1))> max(which(end.bh==1))) {end.bh<-c(end.bh,1)} else {end.bh<-c(end.bh,0)}   
+    irange<-1:sum(init.bh==1)
+    for (z in irange){
+        rect(xleft=bh.region$x[which(init.bh==1)[z]],
+             ybottom=0,
+             xright=bh.region$x[which(end.bh==1)[z]],
+             ytop=1,col="gray90",density=30
+            )
+    }
+}
+```
+
+```{r}
+#short test of the functions
+pr.ph<-c(0.1,0.9)
+pr_e<-c(0.1,0.9)
+my_payoffs<-cbind(c(100,1),c(0,1))
+G_fx(pr.ph,pr_e,my_payoffs)
+#sapply(seq(0,1,0.01), function(x) G_fx(c(x,1-x),pr_e,my_payoffs))
+```
+
+Below we show an example to see that the optimal bet-hedging strategy is not affected by different payoffs in the proportional bet-hedging case with lethal non-optimal phenotypes, while in presence of cues the fitness changes.
+
+```{r}
+pr_ph<-c(0.1,0.9)
+pr_e<-c(0.1,0.1,0.8)
+my_payoffs<-cbind(c(1,0),c(1,0),c(0,1)) 
+
+print("probability of adopting phenotype 1")
+round(find_optimal_pr.ph(pr_e,my_payoffs),3)
+print("log growth rate in presence of cues")
+GC_fx(pr_e,my_payoffs)
+
+my_payoffs<-cbind(c(0.5,0),c(0.5,0),c(0,1))
+print("probability of adopting phenotype 1")
+round(find_optimal_pr.ph(pr_e,my_payoffs),3)
+print("log growth rate in presence of cues")
+GC_fx(pr_e,my_payoffs)
+
+my_payoffs<-cbind(c(1,0.1),c(1,0.1),c(0.8,1)) 
+print("probability of adopting phenotype 1")
+round(find_optimal_pr.ph(pr_e,my_payoffs),3)
+print("log growth rate in presence of cues")
+GC_fx(pr_e,my_payoffs)
+```
+
+## Floods and desert plants
+##### (Examples from Mafessoni, Lachmann and Gokhale, 2020)
+### Symmetric case: two environmental states with two phenotypes
+
+
+```{r}
+my_payoffs<-cbind(c(5,2),c(1,2))
+range_pr.pe<-c(0.001,seq(0.05,1,0.05))
+deltaG<-sapply(range_pr.pe,function(x) delta_GC_fx(c(x,1-x),my_payoffs))
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+plot(range_pr.pe,deltaG[3,],xlim=c(0,1),ylim=c(0,1),type="l",xlab="probability of flood (p)",ylab="x*(p)",lwd=2)
+plot_bh.regions()
+plot(range_pr.pe,deltaG[1,],xlim=c(0,1),type="l",xlab="probability of flood (p)",ylab="fitness benefit of cue",lwd=2)
+plot_bh.regions()
+```
+
+## Asymmetric payoff matrices (3 environments and two phenotypes)
+
+We examined in the main text a classical example of plants exposed to the risk of floods. It is convenient to for them to germinate after a flood, however if a second flood occurs straight after it might wash them away or kill them. In this case we can represent our system along a single probability (p - the risk of floods).
+
+#### Adaptation to intermediates:
+```{r}
+my_payoffs<-cbind(c(1,2),c(4,2),c(1,2))
+range_pr.pe<-c(0.001,seq(0.05,1,0.05))
+deltaG<-sapply(range_pr.pe,function(x) delta_GC_fx(c(x^2,2*x*(1-x),(1-x)^2),my_payoffs))
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(range_pr.pe,deltaG[3,],xlim=c(0,1),ylim=c(0,1),type="l",xlab="probability of flood (p)",ylab="x*(p)",lwd=2)
+plot_bh.regions()
+plot(range_pr.pe,deltaG[1,],xlim=c(0,1),type="l",xlab="probability of flood (p)",ylab="fitness benefit of cue",lwd=2)
+plot_bh.regions()
+```
+
+#### Adaptation to extremes: Multiplicity of bet-hedging.
+
+```{r}
+my_payoffs<-cbind(c(4,3),c(1,3),c(6,3))
+range_pr.pe<-c(0.001,seq(0.05,1,0.05))
+deltaG<-sapply(range_pr.pe,function(x) delta_GC_fx(c(x^2,2*x*(1-x),(1-x)^2),my_payoffs))
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(range_pr.pe,deltaG[3,],xlim=c(0,1),ylim=c(0,1),type="l",xlab="probability of flood (p)",ylab="x*(p)",lwd=2)
+plot_bh.regions()
+plot(range_pr.pe,deltaG[1,],xlim=c(0,1),type="l",xlab="probability of flood (p)",ylab="fitness benefit of cue",lwd=2)
+plot_bh.regions()
+```
+
+## An example with 4 environments and 2 phenotypes: drought and competition with other species in pioneer plants
+
+In previous examples we represented our environments as a function of the frequency of one variable (p - the risk of floods) for simplicity. However, we showed in the section "Extension to finite populations" of Mafessoni, Lachmann and Gokhale that this is only a possible way to explore combinations of different environmental states (in Figure 5 shown as a potential trajectory in the simplex of potential combinations of environmental states). Therefore, the probabilities of environmental states 1,2 and 3 might actually be set to take any probability values $p_1$,$p_2$ and $p_3$ (with $p_1+p_2+p_3=1$), to explore any ecological gradient of interest.
+
+Here we show an hypotetical example in which multiple environmental factors affect the fitness of a species. Thus, the environmental states that our hypothetical species has to face are determined by the combinations of these factors. We take the example of rainforest pioneer plants. The growth of these plants is not only hindered by abiotic factors (for example water availability) but also by the presence of other plants. For this reason the seeds of these species, uniquely among other plants, break their dormancy in response to light. We now want to calculate the fitness benefit of informative cues (light and water) for the germination of an hypothetical species of rainforest pioneer plant. We assume that a seed of our pioneer plant might end up under the canopy (with probability p_canopy) or in a clear patch of forest (the latter being favorable), and that could have sufficient water (with probability p_wet) or not (p_arid=1-p_wet). Therefore we can have four possible environmental states (wet-canopy, wet-clear, arid-canopy, arid-clear) with probabilities p_wet x (1-p_canopy), p_wet x (1-p_canopy), (1-p_wet) x p_canopy and (1-p_wet) x p_canopy, respectively. This illustrates that interactions between multiple environmental factors can lead to asymmetric interaction matrices in which the number of potential environmental states exceeds that of phenotypes.
+
+
+|phenotype\\env.states | wet-canopy | wet-clear |arid-canopy | arid-clear|
+|--- | --- | ---| --- | ---|
+|germination| 1| 10| 2.1| 1|
+|dormancy| 2| 2| 2| 2|
+
+
+```{r}
+my_payoffs<-cbind(c(1,2),c(10,2),c(2.1,2),c(1,2))
+range_pr.pe<-c(0.01,seq(0.1,1,0.1))
+x_range<-expand.grid(range_pr.pe,range_pr.pe)
+xx_range<-cbind(x_range[,1]*x_range[,2],x_range[,1]*(1-x_range[,2]),(1-x_range[,1])*x_range[,2],(1-x_range[,1])*(1-x_range[,2]))
+deltaG<-sapply(1:nrow(xx_range),function(x) delta_GC_fx(xx_range[x,],my_payoffs))
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+rbPal <- colorRampPalette(c('gold1','forestgreen'))
+xcols <- rbPal(10)[as.numeric(cut(deltaG[3,],breaks = 10))]
+plot(xx_range[,1]+xx_range[,2],xx_range[,1]+xx_range[,3],col=xcols,pch=19,cex=3,xlab="probability wet",ylab="probability canopy",main="probability germination")
+xcols <- rbPal(10)[as.numeric(cut(deltaG[1,],breaks = 10))]
+plot(xx_range[,1]+xx_range[,2],xx_range[,1]+xx_range[,3],col=xcols,pch=19,cex=3,xlab="probability wet",ylab="probability canopy",main="fitness benefit cue")
+xcols <- rbPal(10)[as.numeric(cut(deltaG[2,],breaks = 10))]
+plot(xx_range[,1]+xx_range[,2],xx_range[,1]+xx_range[,3],col=xcols,pch=19,cex=3,xlab="probability wet",ylab="probability canopy",main="log growth rate")
+```
+
+We can see that without cues plants would evolve to always germinate in clear areas, and hedge their bets in intermediate regions of aridity and canopy cover. For rainforest (high probability wet) the fitness benefit of a cue along the y axis reaches a peak for intermediate values. This indicates that plants adapted to light and wet conditions would have the highest fitness benefit in perceiving a cue about the canopy state (for example light) for intermediate covers of canopy. A possible biological prediction is that plants whose seeds respond to light to interrupt dormancy are unlikely to evolve in forest that show very few clear patches or that are very sparse. Conversely, we see that along the x-axis (probability of wet), for small values of canopy covers (plants that live in open areas), the fitness benefit of a cue is maximum for intermediate values of wetness-aridity.
+
+## The fitness value of perceiving lunar emergence and tides in hypotetical intertidal organisms
+
+The reproductive behaviour of many marine organisms living in intertidal environments is strongly influenced by tidal patterns. A correct timing for the emergence of the adult individuals of these species is critical in natural populations, since high tides can wash away the individuals, preventing their reproduction. For example, a favorable time for the reproduction of the marine midge *Clunio marinus* (Chironomidae, Diptera) occurs only for about 4 hours in a lunar cycle. *Clunio* individual rely on a complex a circalunar clock to obtain cues on when to emerge. Here we sketch an hypothetical estimate of the theoretical fitness advantage of the complex adaptative mechanism of similar organisms. We stress the fact that * **these calculations are purely hypothetical** *, 
+as currently not enough data is available to accurately estimate the fitness consequences of different scenarios for this species, and only approximate calculations can be made. Therefore We denote our hypotethical species simply as *moonlight*.
+
+To illustrate this case, we model it in two different ways. In both cases we rely on the intuition that
+we can represent our system in terms of two different environmental states (low tide or high tide). The frequency of low-tides, which are apt for reproduction, is: 
+
+frequency of conditions apt for reproduction ~ 4/(28*24) ~ 0.6%
+
+First, we could consider a 2x2 environment-behavior matrix with two phenotypes, dormancy and emergence, similarly to the cases of annual plants described above. Every hour individuals can potentially emerge or not. In absence of any cues, *moonlight* individuals could hedge their bets whether to emerge and face the risk of encountering a high-tide, or wait one more hour. Since an individual cannot reproduce if the tide is high, we assume payoff 0 in that case. When an individual emerges at low-tide manage, its payoffs is $n_l$, which we can imagine as the number of larvae passed to the next generation. Dormant individuals might emerge later. Since we do not know how long *moonlight* could survive without emerging, we specify a payoff for dormancy of $1-1/(24*28)$, which can be seen as the probability that an individual survive to the next hour assuming an average lifespan of one lunar cycle and a constant death rate.
+In absence of cues:
+
+```{r}
+prob_nocturnal.lowtide<-4/(28*24);prob_nocturnal.lowtide
+number.offspring.nocturnal.lowtide<-1000
+#my_payoffs<-cbind(c(number.offspring.nocturnal.lowtide,1-1/(24*28)),c(0,1-1/(24*28)))
+my_payoffs<-cbind(c(number.offspring.nocturnal.lowtide,0.1),c(0,1-1/(24*28)))
+
+pr_e<-c(prob_nocturnal.lowtide,1-prob_nocturnal.lowtide)
+fitnesses<-sapply(seq(0,1,0.0001), function(x) G_fx(c(x,1-x),pr_e,my_payoffs))
+                  
+pr_ph<-seq(0,1,0.0001)[which.max(fitnesses)] 
+print(paste0("probability of emergence/hour in absence of cues: ",pr_ph))
+print(paste0("log growth ratein absence of cues: ",G_fx(c(pr_ph,1-pr_ph),pr_e,my_payoffs)))
+```
+
+When informative cues are used instead the log growth rate is:
+
+```{r}
+GC_fx(pr_e,my_payoffs)
+```
+
+Hence, the fitness value of the complex adaptative strategy of Clunio is (in terms of bits):
+
+G(E|C)-G(E)=
+```{r}
+GC_fx(pr_e,my_payoffs)-G_fx(c(pr_ph,1-pr_ph),pr_e,my_payoffs)
+```
+
+Notice that here we made some assumptions about the life cycle of Clunio. For example we assumed that each successfull reproduction event might lead to 1000 larvae. How does the fitness benefit depend on the number of larvae?
+
+```{r}
+species1_fx<-function(prob_nocturnal.lowtide,number.offspring.nocturnal.lowtide){
+    my_payoffs<-cbind(c(number.offspring.nocturnal.lowtide,1),c(0,1))
+
+    pr_e<-c(prob_nocturnal.lowtide,1-prob_nocturnal.lowtide)
+    fitnesses<-sapply(seq(0,1,0.0001), function(x) G_fx(c(x,1-x),pr_e,my_payoffs))
+    
+    pr_ph<-seq(0,1,0.0001)[which.max(fitnesses)]
+    res<-c(
+    pr_e[1],
+    G_fx(c(pr_ph,1-pr_ph),pr_e,my_payoffs),
+    GC_fx(pr_e,my_payoffs)-G_fx(c(pr_ph,1-pr_ph),pr_e,my_payoffs))
+    names(res)<-c("pr_e","log_g_nocues","fitness_value_cue")
+    res
+}
+
+#species1_fx(prob_nocturnal.lowtide,number.offspring.nocturnal.lowtide)
+x_range<-c(10,seq(200,5000,200))
+species1.number.offspring<-sapply(x_range, function(x) species1_fx(prob_nocturnal.lowtide,x))
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(x_range,species1.number.offspring[2,],type="l",xlab="n.offspring",ylab="G(E)",lwd=1.5)
+plot(x_range,species1.number.offspring[3,],type="l",xlab="n.offspring",ylab="fitness benefit of cue at each hour",lwd=1.5)
+```
+
+Note that here the fitness value of a cue is considered for an individual time unit (here hours) of the life cycle of a species of *moonlight*. To obtain the value for the entire cycle, we just have to multiplicate by its lenght. So, for life-cycle of approximately 28 days, **a clue for a *moonlight* with many larvae would have approximately 5 bits of value.** 
+Interestingly, different populations of Clunio in different geographical regions have been found with different circalunar and circadian patterns. Specifically, in some populations Clunio emerges exclusively with full moon, while in others exclusively with the new moon low-tide. In these cases adults can achieve sexual reproduction only in one tide-light condition per lunar cycle, most often with the new-moon.   
+
+However, in some populations individuals bet-hedge between the two lunar phases in equal proportions. In these cases, two potential reproductive time windows exist. 
+
+How does the fitness value of the lunar signal differ in the two cases? In the plots we can see G(E) and the fitness value of an informative cue about the circalunar phase, for a population all synchronously emerging at the new-moon low-tide (1m), or populations in which individuals can emerge either in new or full moon low-tides (2m). At low proportions of favorable tide-light conditions for reproduction the increase in fitness value increases roughly linear. 
+
+```{r}
+timepoints<-seq(0.001,0.05,length.out = 20)
+timepoints<-c(4/(28*24),2*4/(28*24),timepoints)
+timepoints<-sort(timepoints)
+pos1<-which(timepoints==4/(28*24))
+pos2<-which(timepoints==2*4/(28*24))
+species1.prob_nocturnal.lowtide<-sapply(timepoints, function(x) species1_fx(x,1000))
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(log(timepoints),species1.prob_nocturnal.lowtide[2,],type="l",xlab="prob.favourable.for.reproduction",ylab="G(E)",xaxt="n",lwd=1.5)
+myticks<-c(0.001,0.005,0.01,0.05,0.1,0.5)
+axis(1, at=log(myticks), labels=myticks,las=2)
+points(log((1:2)*4/(28*24)),as.numeric(species1.prob_nocturnal.lowtide[2,c(pos1,pos2)]),pch=19,col=c("red","blue"))
+text(x=log((1:2)*4/(28*24))+0.5,y=as.numeric(species1.prob_nocturnal.lowtide[2,c(pos1,pos2)]),label=c("1m","2m"),col=c("red","blue"))
+
+plot(log(timepoints),species1.prob_nocturnal.lowtide[3,],type="l",xlab="prob.favourable.for.reproduction",ylab="fitness benefit of cue",xaxt="n",lwd=1.5)
+myticks<-c(0.001,0.005,0.01,0.05,0.1,0.5)
+axis(1, at=log(myticks), labels=myticks,las=2)
+points(log((1:2)*4/(28*24)),as.numeric(species1.prob_nocturnal.lowtide[3,c(pos1,pos2)]),pch=19,col=c("red","blue"))
+text(x=log((1:2)*4/(28*24))+0.5,y=as.numeric(species1.prob_nocturnal.lowtide[3,c(pos1,pos2)]),label=c("1m","2m"),col=c("red","blue"))
+```
+
+There are some problems with this model: first, we do not know the payoffs second, it might be inappropriate to assume a constant death rate; third, we might want to model explicitly different strategies (which have for example been documented in *Clunio*) and cues; last, we know that in a month there is always a fixed number of low-tides.
+
+To circumvent these issues, we can think of a simple second model, in which the possible phenotypes are the different circalunar and circadian conditions for adult emergence. In a lunar month there are 28 days (28 lunar phases) and for each day several time-light conditions. Since adults live 2-4 hours we consider 6 4-hour long time-light conditions each day, for a total of 168 moon-light conditions. Individuals can hedge their bets across them. Since reproduction cannot occur if adults do not emerge during low tides we have a proportional bet-hedging case, we can collpase the 168x168 matrix to a 2x2 matrix:
+
+|emerge time\\time | time1  | time2| ... | time168|
+--- | --- | ---| --- | ---|
+|emerge time 1| 1| 0| 0| 0|
+|emerge time 2| 0| 1| 0| 0|
+|..| ..| ..| ..| ..|
+|emerge time 168| 0| 0| 0| 1|
+
+where we define time1 the actual time of low tides. 
+
+In absence of cues the probability of emergence is (since we have proportional bet-hedging) $1/168$, and log growth rate is $log(1/168)$.
+
+When informative cues are used instead the log growth rate is simply 0 (if the payoff is 1 to reflect a population at the steady state).
+
+Hence, the fitness value of the complex adaptative strategy of Clunio is (in terms of bits):
+G(E|C)-G(E)=
+```{r}
+0-log(1/168)
+```
+which is similar to what obtained above for large offspring sizes. Note that we can also look separately at the value of the information coming from the lunar cycle and circadian one. An organism relying only on the moon cycle has still no clue at what time of the day to emerge - since this is informed by the light cycle. Hence, an organism would hedge its bets across the 6 time of the day conditions. Its log growth in absence of light information will be:
+
+$G(E)_{only moon}=log(1/6)$
+
+while one not being able to rely on the lunar cycle but only on time-light:
+
+$$G(E)_{only light}=log(1/28)$$
+
+Hence, the fitness value of lunar and circadian clues are:
+
+$$G(E;moon)=$$
+```{r}
+log(1/6)-log(1/168)
+```
+
+$$G(E;sun)=$$
+```{r}
+log(1/28)-log(1/168)
+```
+indicating that the lunar cycle is about twice as important as time cues in terms of fitness for *moonlight*.
+
+### References:
+
+*Ecophysiology of Seed Germination in the Tropical Humid Forests of the World: A Review.* Vazquez-Yanes C., Orozco Segovia A. (1984) In: Ernesto Medina , Harold A Mooney , Carlos Vázquez-Yánes (eds) Physiological ecology of plants of the wet tropics. Tasks for vegetation Science, vol 12. Springer, Dordrecht
+
+*Timing the tides: Genetic control of diurnal and lunar emergence times is correlated in the marine midge Clunio marinus*, Tobias S Kaiser, Dietrich Neumann and David G Heckel, BMC Genetics 2011, 12:49
+
+*Timing strains of the marine insect Clunio marinus diverged and persist with gene flow*,
+Tobias S Kaiser, Arndt von Haeseler, Kristin Tessmar-Raible, David G Heckel, Molecular Ecology, 2021;30:1264–1280.
